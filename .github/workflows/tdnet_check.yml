@@ -1,0 +1,59 @@
+name: Daily TDnet Check
+
+on:
+  schedule:
+    # 毎日 日本時間(JST)の 18:00 に自動実行する設定
+    # (UTC時間では 9:00 のため、0 9 * * * と書きます)
+    - cron: '0 9 * * *'
+  workflow_dispatch: # GitHubの画面から手動でいつでも実行できるボタンを追加
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. GitHub上のコード（Pythonファイルやcodes.txt）を読み込む
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. Pythonの環境をセットアップする
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-state: '3.10'
+
+    # 3. 必要なライブラリ（requests）をインストールする
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    # 4. あなたのPythonスクリプトを実行する
+    # 実行後、生成されたresult_xxxx.txtのファイル名を特定して環境変数に格納
+    - name: Run script
+      run: |
+        python tdnet.py
+        # 生成されたファイルのパスを取得して、後続のステップで使えるようにする
+        FILENAME=$(ls result_*.txt | head -n 1)
+        echo "RESULT_FILE=$FILENAME" >> $GITHUB_ENV
+
+    # 5. 結果ファイルをメールで送信する
+    - name: Send Mail
+      uses: dawidd6/action-send-mail@v3
+      with:
+        # メールサーバーの設定（ここではGmailの例です。他社製なら適宜変更してください）
+        server_address: ://gmail.com
+        server_port: 465
+        # 隠し金庫からIDとパスワードを読み込む
+        username: ${{ secrets.MAIL_USERNAME }}
+        password: ${{ secrets.MAIL_PASSWORD }}
+        
+        # メールの宛先と差出人の設定
+        subject: "【自動配信】TDnet適時開示 取得結果通知"
+        to: "haruharuharu0114@gmail.com" # ★ここを書き換えてください
+        from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
+        
+        # メールの本文
+        body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付ファイルをご確認ください。"
+        # 生成されたテキストファイルをメールに直接添付する
+        attachments: ${{ env.RESULT_FILE }}
