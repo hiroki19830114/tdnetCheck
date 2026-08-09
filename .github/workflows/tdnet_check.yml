@@ -31,7 +31,7 @@ jobs:
     # 【ここを修正】結果ファイルが作られなかった場合でもエラーにしない対策を入れました
     - name: Run script
       run: |
-        python tdnet.py
+        python chkTdnet.py
         
         # もし result_*.txt というファイルが存在するかチェック
         if ls result_*.txt 1> /dev/null 2>&1; then
@@ -54,7 +54,7 @@ jobs:
         password: ${{ secrets.MAIL_PASSWORD }}
         
         subject: "【自動配信】TDnet適時開示 取得結果通知"
-        to: "ここに通知を送りたいあなたのメールアドレス@example.com" # ★あなたのアドレスに書き換えてください
+        to: "haruharuharu0114@gmail.com" # ★あなたのアドレスに書き換えてください
         from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
         
         # 本文を少しスマートに分岐させています
