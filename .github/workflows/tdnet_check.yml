@@ -15,11 +15,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. Pythonの環境をセットアップする（タイポを修正）
+    # 2. Pythonの環境をセットアップする
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # 正しい記述に修正しました
+        python-version: '3.11'
 
     # 3. 必要なライブラリをインストールする
     - name: Install dependencies
@@ -28,12 +28,21 @@ jobs:
         pip install requests
 
     # 4. あなたのPythonスクリプトを実行する
+    # 【ここを修正】結果ファイルが作られなかった場合でもエラーにしない対策を入れました
     - name: Run script
       run: |
         python tdnet.py
-        # 生成されたファイルのパスを取得して環境変数に格納
-        FILENAME=$(ls result_*.txt | head -n 1)
-        echo "RESULT_FILE=$FILENAME" >> $GITHUB_ENV
+        
+        # もし result_*.txt というファイルが存在するかチェック
+        if ls result_*.txt 1> /dev/null 2>&1; then
+          FILENAME=$(ls result_*.txt | head -n 1)
+          echo "RESULT_FILE=$FILENAME" >> $GITHUB_ENV
+          echo "HAS_RESULT=true" >> $GITHUB_ENV
+        else
+          echo "HAS_RESULT=false" >> $GITHUB_ENV
+          echo "本日発表された適時開示はありませんでした。" > no_result.txt
+          echo "RESULT_FILE=no_result.txt" >> $GITHUB_ENV
+        fi
 
     # 5. 結果ファイルをメールで送信する
     - name: Send Mail
@@ -48,5 +57,6 @@ jobs:
         to: "ここに通知を送りたいあなたのメールアドレス@example.com" # ★あなたのアドレスに書き換えてください
         from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
         
-        body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付ファイルをご確認ください。"
+        # 本文を少しスマートに分岐させています
+        body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
         attachments: ${{ env.RESULT_FILE }}
