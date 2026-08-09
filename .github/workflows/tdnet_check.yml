@@ -27,8 +27,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
 
-    # 4. あなたのPythonスクリプトを実行する
-    # 【ここを修正】結果ファイルが作られなかった場合でもエラーにしない対策を入れました
+    # 4. あなたのPythonスクリプトを実行する（★ここを chkTdnet.py に修正しました）
     - name: Run script
       run: |
         python chkTdnet.py
@@ -57,6 +56,5 @@ jobs:
         to: "haruharuharu0114@gmail.com" # ★あなたのアドレスに書き換えてください
         from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
         
-        # 本文を少しスマートに分岐させています
         body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
         attachments: ${{ env.RESULT_FILE }}
