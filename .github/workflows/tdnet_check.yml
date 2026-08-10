@@ -37,17 +37,18 @@ jobs:
           echo "RESULT_FILE=no_result.txt" >> $GITHUB_ENV
         fi
 
+    # 【変更】エラーの原因となっていたアクションを別の安定版に変更しました
     - name: Send Mail
-      uses: dawidd6/action-send-mail@v4
+      uses: prime-prime/send-email-action@v1.2.1
       with:
-        server_address: ://gmail.com
-        server_port: 465
-        username: ${{ secrets.MAIL_USERNAME }}
-        password: ${{ secrets.MAIL_PASSWORD }}
+        smtp_server: "smtp.gmail.com"
+        smtp_port: 465
+        smtp_username: ${{ secrets.MAIL_USERNAME }}
+        smtp_password: ${{ secrets.MAIL_PASSWORD }}
         
         subject: "【自動配信】TDnet適時開示 取得結果通知"
         to: "haruharuharu0114@gmail.com"
-        from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
+        from: "TDnet Bot"
         
         body: "本日の東証TDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
         attachments: "${{ env.RESULT_FILE }}"
