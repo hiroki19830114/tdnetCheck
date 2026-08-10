@@ -43,7 +43,6 @@ jobs:
         with open(output_file, "w", encoding="utf-8") as f_init:
             f_init.write("=== 適時開示・決算速報 取得結果 (東証公式アーカイブ版) ===\n")
             f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f_out = f_init # 互換用
             f_init.write("==================================================\n\n")
 
         if not os.path.exists(TXT_FILE):
@@ -66,11 +65,12 @@ jobs:
 
         hit_records = {}
 
-        # ★海外IPでも100%遮断されず、当日分の全開示がアーカイブされている東証公式のバックエンドURL
-        url = "https://tdnet.info"
+        # 当日分の全開示がアーカイブされている東証公式のバックエンドURL
+        # (現在、最新の開示一覧のベースURLは I_main_00.html に変更されています)
+        url = "https://www.release.tdnet.info/inbs/I_main_00.html"
         
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
             response.encoding = "shift_jis" # 東証はShift_JIS
             
@@ -92,7 +92,10 @@ jobs:
                         title_a = row.find("a", class_="kaijiTitle")
                         if title_a:
                             title_text = title_a.get_text(strip=True)
-                            pdf_url = "https://tdnet.info" + title_a["href"]
+                            
+                            # 【修正】不正なドメインエラーを回避するため、完全に固定値でURLを結合
+                            href_val = title_a["href"]
+                            pdf_url = f"https://www.release.tdnet.info/inbs/{href_val}"
                             
                             company_elem = row.find("td", class_="yjM")
                             company_name = company_elem.get_text(strip=True) if company_elem else "企業名不明"
@@ -105,7 +108,7 @@ jobs:
                                 hit_records[code].append(record)
         except Exception as e:
             with open(output_file, "a", encoding="utf-8") as f_out:
-                f_out.write(f"【システムエラー】東証へのアクセスに失敗しました: {e}\n")
+                f_out.write(f"【システムエラー】東証へのアクセスまたは解析に失敗しました: {e}\n")
 
         # 最後に結果を追記
         with open(output_file, "a", encoding="utf-8") as f_out:
