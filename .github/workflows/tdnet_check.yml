@@ -2,7 +2,7 @@ name: Daily TDnet Check
 
 on:
   schedule:
-    # 毎日 日本時間(JST)の 18:00 に自動実行する設定
+    # 毎日 日本時間(JST)の 18:00 に自動実行する設定 (UTCで9:00)
     - cron: '0 9 * * *'
   workflow_dispatch: # 手動実行ボタン
 
@@ -27,7 +27,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
 
-    # 4. あなたのPythonスクリプトを実行する（★ここを chkTdnet.py に修正しました）
+    # 4. あなたのPythonスクリプトを実行する
     - name: Run script
       run: |
         python chkTdnet.py
@@ -45,7 +45,7 @@ jobs:
 
     # 5. 結果ファイルをメールで送信する
     - name: Send Mail
-      uses: dawidd6/action-send-mail@v3
+      uses: dawidd6/action-send-mail@v4  # ★ v3 から v4 に修正してNode関連の警告を解消
       with:
         server_address: smtp.gmail.com
         server_port: 465
@@ -53,8 +53,8 @@ jobs:
         password: ${{ secrets.MAIL_PASSWORD }}
         
         subject: "【自動配信】TDnet適時開示 取得結果通知"
-        to: "haruharuharu0114@gmail.com" # ★あなたのアドレスに書き換えてください
+        to: "haruharuharu0114@gmail.com"
         from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
         
         body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
-        attachments: ${{ env.RESULT_FILE }}
+        attachments: "${{ env.RESULT_FILE }}"  # ★ パスを安全に渡すため、ダブルクォーテーションで囲む
