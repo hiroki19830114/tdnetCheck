@@ -33,7 +33,7 @@ jobs:
         import requests
         from bs4 import BeautifulSoup
 
-        TXT_FILE = "codes.txt"
+        TXT_FILE = "code.txt"
         output_file = "result.txt"
 
         headers = {
