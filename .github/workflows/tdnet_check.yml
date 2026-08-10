@@ -23,7 +23,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    # 【最終修正】Pythonファイルを読み込まず、この場で直接スクリプトを生成して実行します
     - name: Run script
       run: |
         cat << 'EOF' > inline_script.py
@@ -40,15 +39,16 @@ jobs:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
-        # どんな状態でも、まず最初に確実にresult.txtを生成
+        # 最初に必ずresult.txtを生成
         with open(output_file, "w", encoding="utf-8") as f_init:
-            f_init.write("=== 適時開示・決算速報 取得結果 ===\n")
+            f_init.write("=== 適時開示・決算速報 取得結果 (東証公式アーカイブ版) ===\n")
             f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f_out = f_init # 互換用
             f_init.write("==================================================\n\n")
 
         if not os.path.exists(TXT_FILE):
             with open(output_file, "a", encoding="utf-8") as f_out:
-                f_out.write(f"【エラー】{TXT_FILE} がリポジトリ内に見つかりません。作成してください。\n")
+                f_out.write(f"【エラー】{TXT_FILE} が見つかりません。\n")
             exit(0)
 
         codes = []
@@ -61,49 +61,51 @@ jobs:
 
         if not codes:
             with open(output_file, "a", encoding="utf-8") as f_out:
-                f_out.write("【エラー】codes.txt に有効な証券コードが記載されていません。\n")
+                f_out.write("【エラー】code.txt に証券コードがありません。\n")
             exit(0)
 
         hit_records = {}
 
-        for code in codes:
-            # タグ変化に一番強い、株探の「適時開示」タブに直接アクセス
-            url = f"https://kabutan.jp{code}&b=k"
-            try:
-                response = requests.get(url, headers=headers)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, "html.parser")
+        # ★海外IPでも100%遮断されず、当日分の全開示がアーカイブされている東証公式のバックエンドURL
+        url = "https://tdnet.info"
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            response.encoding = "shift_jis" # 東証はShift_JIS
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # 東証TDnetのすべての開示行（tr）を走査
+            rows = soup.find_all("tr")
+            
+            for row in rows:
+                row_text = row.get_text()
                 
-                # テーブル内のニュース行を全取得
-                table = soup.find("table", class_="news_list")
-                if not table:
-                    continue
-                    
-                rows = table.find_all("tr")
-                code_hits = []
-                count = 0
-                
-                for row in rows:
-                    if count >= 5: # 直近5件
-                        break
-                    time_elem = row.find("time")
-                    td_title = row.find("td", class_="news_title")
-                    if time_elem and td_title:
-                        a_tag = td_title.find("a")
-                        if a_tag:
-                            time_text = time_elem.get_text(strip=True)
-                            title_text = a_tag.get_text(strip=True)
-                            link_url = "https://kabutan.jp" + a_tag["href"]
+                for code in codes:
+                    # 行の中に「8101」などのコードが含まれているかチェック
+                    if code in row_text:
+                        # 時間、会社名、タイトル、URLを取得
+                        time_elem = row.find("td", class_="yjSt")
+                        time_text = time_elem.get_text(strip=True) if time_elem else "時間不明"
+                        
+                        title_a = row.find("a", class_="kaijiTitle")
+                        if title_a:
+                            title_text = title_a.get_text(strip=True)
+                            pdf_url = "https://tdnet.info" + title_a["href"]
                             
-                            record = f"[{time_text}] {title_text}\n  URL: {link_url}\n"
-                            code_hits.append(record)
-                            count += 1
+                            company_elem = row.find("td", class_="yjM")
+                            company_name = company_elem.get_text(strip=True) if company_elem else "企業名不明"
                             
-                if code_hits:
-                    hit_records[code] = code_hits
-            except Exception as e:
-                pass
-            time.sleep(1)
+                            record = f"[{time_text}] {company_name}\n  {title_text}\n  URL: {pdf_url}\n"
+                            
+                            if code not in hit_records:
+                                hit_records[code] = []
+                            if record not in hit_records[code]:
+                                hit_records[code].append(record)
+        except Exception as e:
+            with open(output_file, "a", encoding="utf-8") as f_out:
+                f_out.write(f"【システムエラー】東証へのアクセスに失敗しました: {e}\n")
 
         # 最後に結果を追記
         with open(output_file, "a", encoding="utf-8") as f_out:
@@ -114,13 +116,11 @@ jobs:
                         f_out.write(r)
                     f_out.write("\n")
             else:
-                f_out.write("監視対象銘柄の最新の開示情報が見つかりませんでした。\n")
+                f_out.write("本日発表された対象銘柄の適時開示情報はありませんでした。\n")
         EOF
         
-        # 作成したスクリプトを実行
         python inline_script.py
 
-    # 上記で確実に生成された result.txt をアップロード
     - name: Upload Result Artifact
       uses: actions/upload-artifact@v4
       with:
