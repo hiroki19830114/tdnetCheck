@@ -15,7 +15,7 @@ headers = {
 }
 
 
-# ファイルから証券コードのリストを読み込む関数（GitHub用安全版）
+# ファイルから証券コードのリストを読み込む関数
 def load_company_codes(file_path):
     if not os.path.exists(file_path):
         print(f"【エラー】{file_path} が見つかりません。")
@@ -37,7 +37,7 @@ def main():
         print("【エラー】codes.txt に有効な証券コードが記載されていません。")
         return
 
-    # 保存用のファイル名 (例: result_20260809_180000.txt)
+    # 保存用のファイル名
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"result_{now_str}.txt"
 
@@ -56,8 +56,8 @@ def main():
             if idx % 10 == 0:
                 print(f" {idx}/{len(company_codes)} 件目処理中...")
 
-            # 毎日実行であれば、直近の最新「15件」を取得すれば当日の開示はすべてカバーできます
-            url = f"https://yanoshin.jp{code}.json?limit=15"
+            # 【修正】正しいAPIのURLエンドポイントに変更
+            url = f"https://webapi.yanoshin.jp/webapi/tdnet/list/{code}.json?limit=15"
 
             try:
                 response = requests.get(url, headers=headers)
@@ -66,6 +66,7 @@ def main():
                 response.raise_for_status()
                 raw_data = response.json()
 
+                # APIは通常、{"items": [...]} またはリストを返す
                 items = []
                 if isinstance(raw_data, dict):
                     items = raw_data.get("items", raw_data.get("item", []))
@@ -85,17 +86,24 @@ def main():
                         except Exception:
                             continue
                     elif isinstance(item, dict):
+                        # 階層の深さに対応するため、"Tdnet"があればそれを、なければ親の辞書を使用
                         tdnet_data = item.get("Tdnet", item)
 
-                    pub_date_str = tdnet_data.get("pubdate", "")
-                    company_name = tdnet_data.get("company_name", "企業名不明")
-                    title = tdnet_data.get("title", "タイトルなし")
-                    pdf_url = tdnet_data.get("document_url", "URLなし")
+                    # 【修正】APIの実際のレスポンスキー（先頭大文字など）に対応
+                    pub_date_str = tdnet_data.get(
+                        "pubdate", tdnet_data.get("PubDate", "")
+                    )
+                    company_name = tdnet_data.get(
+                        "company_name", tdnet_data.get("CompanyName", "企業名不明")
+                    )
+                    title = tdnet_data.get("title", tdnet_data.get("Title", "タイトルなし"))
+                    pdf_url = tdnet_data.get(
+                        "document_url", tdnet_data.get("Url", "URLなし")
+                    )
 
                     # 一致チェック：日付文字列の先頭10文字が「今日」かどうか
                     if pub_date_str:
                         item_date_prefix = pub_date_str[:10]
-                        # ハイフン形式、またはスラッシュ形式の「今日」でなければスキップ
                         if (item_date_prefix != TODAY_HYPHEN) and (
                             item_date_prefix != TODAY_SLASH
                         ):
@@ -114,7 +122,7 @@ def main():
             except Exception:
                 pass
 
-            # 1秒待機
+            # サーバ負荷軽減のため1秒待機
             time.sleep(1)
 
         f_out.write("\n【完了】すべてのチェックが終了しました。\n")
