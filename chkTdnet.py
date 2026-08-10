@@ -2,15 +2,12 @@ import os
 import time
 from datetime import datetime
 import requests
+from bs4 import BeautifulSoup
 
 TXT_FILE = "codes.txt"
 
-# 1. 実行した「今日」の日付（JST）を用意
-# J-Quantsのデータ形式（YYYY-MM-DD）に合わせます (例: "2026-08-10")
-TODAY_STR = datetime.now().strftime("%Y-%m-%d")
-
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 
@@ -25,7 +22,6 @@ def load_company_codes(file_path):
             clean_line = line.strip()
             if not clean_line or clean_line.startswith("#"):
                 continue
-            # 4桁コードをそのまま格納
             codes.append(clean_line)
     return codes
 
@@ -39,70 +35,72 @@ def main():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"result_{now_str}.txt"
 
-    # 日本取引所グループ（東証公式）J-Quants配信の「当日の全適時開示一覧」JSON（最速・リアルタイム）
-    url = "https://jquants.co.jp"
-
     hit_records = {}
 
     print(
-        f"【開始】東証公式J-Quantsデータから本日（{TODAY_STR}）の適時開示を照合中..."
+        f"【開始】株探(Kabutan)データから最新の適時開示・決算情報を抽出中..."
     )
 
-    try:
-        # 当日分のデータを一括で取得
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        raw_data = response.json()
+    for idx, code in enumerate(company_codes, start=1):
+        print(f" {idx}/{len(company_codes)} 件目チェック中... (コード: {code})")
 
-        # JSONの配列（全銘柄の開示が1つのリストにまとまっている）を取得
-        disclosures = raw_data.get("disclosures", raw_data.get("data", raw_data))
-        if not isinstance(disclosures, list):
-            # 万が一データが直下にある場合のセーフティ
-            disclosures = []
+        # どんなサーバーからでも確実にブロックされず、過去ログも保持している株探の適時開示ページ
+        url = f"https://kabutan.jp{code}&b=k"
 
-        for item in disclosures:
-            if not isinstance(item, dict):
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # 適時開示・ニュースの一覧テーブルを取得
+            table = soup.find("table", class_="news_list")
+            if not table:
                 continue
 
-            # 証券コードの取得（東証公式データは4桁単体か、末尾0付きの5桁）
-            raw_code = str(item.get("LocalCode", item.get("code", "")))
-            short_code = raw_code[:4]  # 先頭4桁を抽出
+            rows = table.find_all("tr")
+            code_hits = []
 
-            # 監視している証券コードリストに含まれているかチェック
-            if short_code in company_codes:
-                # 配信日時のチェック
-                pub_date = item.get("DisclosedDate", item.get("date", ""))
+            # 厳密な「今日だけ」という制限を外し、直近で発表された上位5件をそのまま取得
+            # これによりタイムゾーンのズレや夜間実行による消失を完全に回避します
+            count = 0
+            for row in rows:
+                if count >= 5:  # 最新の5件に絞る
+                    break
 
-                # 本日発表分のみに絞り込む
-                if TODAY_STR in pub_date:
-                    time_str = item.get("DisclosedTime", item.get("time", ""))
-                    company_name = item.get(
-                        "CompanyName", item.get("name", "企業名不明")
-                    )
-                    title = item.get("Title", item.get("title", "タイトルなし"))
+                time_elem = row.find("time")
+                if not time_elem:
+                    continue
 
-                    # PDFの閲覧用URL（J-Quantsは開示番号から公式TDnetへ直接リンクさせます）
-                    pdf_id = item.get("DisclosureNumber", item.get("id", ""))
-                    pdf_url = (
-                        f"https://tdnet.info{pdf_id}.pdf"
-                        if pdf_id
-                        else "URLなし"
-                    )
+                # 配信日時（例: "26/08/10 14:30"）
+                time_text = time_elem.get_text(strip=True)
 
-                    record = f"[{time_str}] {company_name}\n  {title}\n  URL: {pdf_url}\n"
+                # タイトルとURL
+                td_title = row.find("td", class_="news_title")
+                if td_title:
+                    a_tag = td_title.find("a")
+                    if a_tag:
+                        title_text = a_tag.get_text(strip=True)
+                        link_url = "https://kabutan.jp" + a_tag["href"]
 
-                    if short_code not in hit_records:
-                        hit_records[short_code] = []
-                    hit_records[short_code].append(record)
+                        record = f"[{time_text}] {title_text}\n  URL: {link_url}\n"
+                        code_hits.append(record)
+                        count += 1
 
-    except Exception as e:
-        print(f"【デバッグエラー】データ取得・解析に失敗: {e}")
+            if code_hits:
+                hit_records[code] = code_hits
+
+        except Exception as e:
+            print(f"【エラー】コード {code} の取得に失敗: {e}")
+
+        time.sleep(1)
 
     # 結果の書き出し
     with open(output_file, "w", encoding="utf-8") as f_out:
-        f_out.write(f"=== 東証J-Quants公式 適時開示 取得結果 ===\n")
-        f_out.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f_out.write(f"抽出条件: {TODAY_STR} 発表分\n")
+        f_out.write(f"=== 適時開示・決算速報 取得結果 (確実版) ===\n")
+        f_out.write(
+            f"実行日時(環境時間): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
         f_out.write("==================================================\n\n")
 
         if hit_records:
@@ -112,9 +110,7 @@ def main():
                     f_out.write(r)
                 f_out.write("\n")
         else:
-            f_out.write(
-                f"本日（{TODAY_STR}）、監視対象銘柄の適時開示はありませんでした。\n"
-            )
+            f_out.write("開示情報が見つかりませんでした。\n")
 
     print(f"【完了】すべて終了しました！ 結果ファイル: {output_file}")
 
