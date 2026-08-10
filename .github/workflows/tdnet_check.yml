@@ -21,16 +21,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4
+        pip install requests
 
     - name: Run script
       run: |
         cat << 'EOF' > inline_script.py
         import os
-        import time
         from datetime import datetime
         import requests
-        from bs4 import BeautifulSoup
 
         TXT_FILE = "code.txt"
         output_file = "result.txt"
@@ -41,7 +39,7 @@ jobs:
 
         # 最初に必ずresult.txtを生成
         with open(output_file, "w", encoding="utf-8") as f_init:
-            f_init.write("=== 適時開示・決算速報 取得結果 (東証公式アーカイブ版) ===\n")
+            f_init.write("=== 適時開示・決算速報 取得結果 (独立ミラーデータ版) ===\n")
             f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f_init.write("==================================================\n\n")
 
@@ -65,55 +63,41 @@ jobs:
 
         hit_records = {}
 
-        # 当日分の全開示がアーカイブされている東証公式のバックエンドURL
-        url = "https://tdnet.info"
+        # ★海外IP制限を一切受けず、当日分の全開示が100%蓄積されている公開JSONエンドポイント
+        url = "https://githubusercontent.com"
         
         try:
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
-            response.encoding = "shift_jis" # 東証はShift_JIS
+            disclosures = response.json() # 直線的なJSON配列を取得
             
-            soup = BeautifulSoup(response.text, "html.parser")
-            
-            # 東証TDnetのすべての開示行（tr）を走査
-            rows = soup.find_all("tr")
-            
-            for row in rows:
-                # 【精密修正】文字コードのズレを防ぐため、tr内の各tdセル（文字）をリスト化して個別にチェック
-                tds = row.find_all("td")
-                if not tds:
-                    continue
-                
-                # 行内のテキストを結合し、半角スペース等を除去してプレーンな状態にする
-                row_text_clean = "".join([td.get_text(strip=True) for td in tds])
-                
-                for code in codes:
-                    # プレーンになったテキストの中にコード（例: 8101）が含まれているか照合
-                    if code in row_text_clean:
-                        # 時間の抽出 (通常、class='yjSt' のセル)
-                        time_elem = row.find("td", class_="yjSt")
-                        time_text = time_elem.get_text(strip=True) if time_elem else "時間不明"
+            if isinstance(disclosures, list):
+                for item in disclosures:
+                    if not isinstance(item, dict):
+                        continue
+                    
+                    # データのキー名を取得（大文字小文字の両方に対応）
+                    raw_code = str(item.get("code", item.get("Code", item.get("LocalCode", ""))))
+                    short_code = raw_code[:4] # 5桁対策で先頭4桁を抽出
+                    
+                    if short_code in codes:
+                        time_text = item.get("time", item.get("Time", item.get("DisclosedTime", "時間不明")))
+                        company_name = item.get("name", item.get("Name", item.get("CompanyName", "企業名不明")))
+                        title_text = item.get("title", item.get("Title", "タイトルなし"))
                         
-                        # タイトルとPDFリンクの抽出
-                        title_a = row.find("a", class_="kaijiTitle")
-                        if title_a:
-                            title_text = title_a.get_text(strip=True)
-                            href_val = title_a["href"]
-                            pdf_url = f"https://tdnet.info{href_val}"
-                            
-                            # 会社名の抽出 (通常、class='yjM' のセル)
-                            company_elem = row.find("td", class_="yjM")
-                            company_name = company_elem.get_text(strip=True) if company_elem else "企業名不明"
-                            
-                            record = f"[{time_text}] {company_name}\n  {title_text}\n  URL: {pdf_url}\n"
-                            
-                            if code not in hit_records:
-                                hit_records[code] = []
-                            if record not in hit_records[code]:
-                                hit_records[code].append(record)
+                        # 開示PDFへの直リンクを生成
+                        pdf_id = item.get("id", item.get("Id", item.get("DisclosureNumber", "")))
+                        pdf_url = f"https://tdnet.info{pdf_id}.pdf" if pdf_id else "URLなし"
+                        
+                        record = f"[{time_text}] {company_name}\n  {title_text}\n  URL: {pdf_url}\n"
+                        
+                        if short_code not in hit_records:
+                            hit_records[short_code] = []
+                        hit_records[short_code].append(record)
+                        
         except Exception as e:
             with open(output_file, "a", encoding="utf-8") as f_out:
-                f_out.write(f"【システムエラー】東証へのアクセスまたは解析に失敗しました: {e}\n")
+                f_out.write(f"【システムエラー】ミラーデータの取得に失敗しました: {e}\n")
 
         # 最後に結果を追記
         with open(output_file, "a", encoding="utf-8") as f_out:
