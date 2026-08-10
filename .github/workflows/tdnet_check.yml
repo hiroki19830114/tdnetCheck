@@ -32,18 +32,18 @@ jobs:
       run: |
         python chkTdnet.py
 
-    # 5. 結果ファイルをメールで送信する
+    # 5. 【修正】Node 24環境で正常に動作するメール送信アクションに切り替え
     - name: Send Mail
-      uses: dawidd6/action-send-mail@v3  # ★ バージョン指定を正しい「v3」に修正
+      uses: bito-hq/send-email-action@v1.0.4
       with:
-        server_address: ://gmail.com
-        server_port: 465                # ★ 数値として安全に認識させる記述
-        username: ${{ secrets.MAIL_USERNAME }}
-        password: ${{ secrets.MAIL_PASSWORD }}
+        smtp_server: "smtp.gmail.com"
+        smtp_port: 465
+        smtp_username: ${{ secrets.MAIL_USERNAME }}
+        smtp_password: ${{ secrets.MAIL_PASSWORD }}
         
         subject: "【自動配信】TDnet適時開示 取得結果通知"
         to: "haruharuharu0114@gmail.com"
-        from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
+        from: "TDnet Bot"
         
         body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
         attachments: "result.txt"
