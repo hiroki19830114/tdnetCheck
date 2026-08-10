@@ -23,24 +23,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
+    # 【修正】余計なシェルスクリプト判定をすべて削除し、Pythonを実行するだけにしました
     - name: Run script
       run: |
         python chkTdnet.py
-        
-        if ls result_*.txt 1> /dev/null 2>&1; then
-          FILENAME=$(ls result_*.txt | head -n 1)
-          echo "RESULT_FILE=$FILENAME" >> $GITHUB_ENV
-          echo "HAS_RESULT=true" >> $GITHUB_ENV
-        else
-          echo "HAS_RESULT=false" >> $GITHUB_ENV
-          echo "本日発表された適時開示はありませんでした。" > no_result.txt
-          echo "RESULT_FILE=no_result.txt" >> $GITHUB_ENV
-        fi
 
-    # 【修正】トラブルの多いメール送信をやめ、ファイルをGitHub上に安全に保存する方式に変更
+    # 【修正】Pythonが生成した「result.txt」をそのまま確実にアップロードします
     - name: Upload Result Artifact
       uses: actions/upload-artifact@v4
       with:
         name: tdnet-result
-        path: "${{ env.RESULT_FILE }}"
+        path: result.txt
         retention-days: 7
