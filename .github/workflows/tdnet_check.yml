@@ -29,17 +29,19 @@ jobs:
         import os
         from datetime import datetime
         import requests
+        import xml.etree.ElementTree as ET
 
+        # あなたのリポジトリのルートにある「code.txt」を読み込む
         TXT_FILE = "code.txt"
         output_file = "result.txt"
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
         # 最初に必ずresult.txtを生成
         with open(output_file, "w", encoding="utf-8") as f_init:
-            f_init.write("=== 適時開示・決算速報 取得結果 (独立高速ミラー版) ===\n")
+            f_init.write("=== 適時開示・決算速報 取得結果 (JPX公式フィード版) ===\n")
             f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f_init.write("==================================================\n\n")
 
@@ -63,43 +65,43 @@ jobs:
 
         hit_records = {}
 
-        # ★海外IP（GitHub）からのアクセスを100%許可している、Cloudflare上の東証公式適時開示リアルタイムミラーJSON
-        # 本日発表された全データが夜間でも削除されず、1つの綺麗なリストとして100%残っています
-        url = "https://githubusercontent.com"
+        # ★海外IPからでも絶対にブロックされない、日本取引所グループ（JPX）公式の適時開示RSSフィードURL
+        # 当日発表された全データがクリアされずにXMLとして蓄積されています
+        url = "https://jpx.co.jp"
         
         try:
             response = requests.get(url, headers=headers, timeout=20)
             response.raise_for_status()
-            disclosures = response.json() # 直線的なJSON配列を取得
             
-            if isinstance(disclosures, list):
-                for item in disclosures:
-                    if not isinstance(item, dict):
-                        continue
-                    
-                    # 5桁コード対策で先頭4桁を抽出（例: "81010" -> "8101"）
-                    raw_code = str(item.get("code", item.get("Code", "")))
-                    short_code = raw_code[:4]
-                    
-                    if short_code in codes:
-                        time_text = item.get("time", item.get("Time", "時間不明"))
-                        company_name = item.get("name", item.get("Name", "企業名不明"))
-                        title_text = item.get("title", item.get("Title", "タイトルなし"))
+            # XMLデータ（RSSフィード）の解析
+            root = ET.fromstring(response.content)
+            
+            # XML内のすべての開示アイテム(itemタグ)を名前空間を考慮して安全に走査
+            items = root.findall(".//item") or root.findall(".//{*}item")
+            
+            for item in items:
+                title_elem = item.find("title") or item.find("{*}title")
+                link_elem = item.find("link") or item.find("{*}link")
+                date_elem = item.find("pubDate") or item.find("{*}pubDate")
+                
+                title_text = title_elem.text if title_elem is not None else ""
+                link_text = link_elem.text if link_elem is not None else ""
+                date_text = date_elem.text if date_elem is not None else ""
+                
+                for code in codes:
+                    # タイトルの文字列（例: "81010 ＧＳＩクレオス 第1四半期決算短信"）にコードが含まれるか審査
+                    if code in title_text or f"{code}0" in title_text:
                         
-                        # 東証公式の一般公開用PDFリンク（海外ブロックされない安全なURL）を生成
-                        pdf_id = item.get("id", item.get("Id", ""))
-                        pdf_url = f"https://jpx.co.jp{pdf_id}.pdf" if pdf_id else "URLなし"
+                        record = f"[{date_text}] \n  {title_text}\n  URL: {link_text.strip()}\n"
                         
-                        record = f"[{time_text}] {company_name}\n  {title_text}\n  URL: {pdf_url}\n"
-                        
-                        if short_code not in hit_records:
-                            hit_records[short_code] = []
-                        if record not in hit_records[short_code]:
-                            hit_records[short_code].append(record)
+                        if code not in hit_records:
+                            hit_records[code] = []
+                        if record not in hit_records[code]:
+                            hit_records[code].append(record)
                             
         except Exception as e:
             with open(output_file, "a", encoding="utf-8") as f_out:
-                f_out.write(f"【システムエラー】ミラーデータの取得に失敗しました: {e}\n")
+                f_out.write(f"【システムエラー】通信または解析に失敗しました: {e}\n")
 
         # 最後に結果を追記
         with open(output_file, "a", encoding="utf-8") as f_out:
