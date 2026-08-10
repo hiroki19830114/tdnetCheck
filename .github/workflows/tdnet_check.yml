@@ -25,8 +25,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests
-
+        pip install requests beautifulsoup4  # ★ beautifulsoup4 を追加
+        
     # 4. あなたのPythonスクリプトを実行する
     - name: Run script
       run: |
