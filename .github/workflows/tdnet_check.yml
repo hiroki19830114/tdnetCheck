@@ -10,10 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # 【重要】Node 24の強制移行を回避し、一番最初のコードが100%正常に動いていた環境を維持します
-    env:
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
-
     steps:
     # 1. コードを読み込む
     - name: Checkout repository
@@ -47,11 +43,11 @@ jobs:
           echo "RESULT_FILE=no_result.txt" >> $GITHUB_ENV
         fi
 
-    # 5. 一番最初のメール送信ステップ（元のバージョンのまま復活）
+    # 5. 一番最初のメール送信ステップ（ゴミ文字を完全に排除した決定版）
     - name: Send Mail
       uses: dawidd6/action-send-mail@v3
       with:
-        server_address: ://gmail.com
+        server_address: smtp.gmail.com
         server_port: 465
         username: ${{ secrets.MAIL_USERNAME }}
         password: ${{ secrets.MAIL_PASSWORD }}
@@ -60,5 +56,5 @@ jobs:
         to: "haruharuharu0114@gmail.com"
         from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
         
-        body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付 of テキストファイルをご確認ください。"
+        body: "本日のTDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
         attachments: ${{ env.RESULT_FILE }}
