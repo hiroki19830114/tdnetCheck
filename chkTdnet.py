@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 import requests
 
+# 実際のファイル名「code.txt」に合わせました
 TXT_FILE = "code.txt"
 
 headers = {
@@ -30,20 +31,24 @@ def main():
         print("【エラー】code.txt に有効な証券コードが記載されていません。")
         return
 
+    # 保存用のファイル名は固定
     output_file = "result.txt"
 
     with open(output_file, "w", encoding="utf-8") as f_out:
         f_out.write(f"=== TDnet適時開示 取得結果 ===\n")
         f_out.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f_out.write("抽出条件: 直近の最新開示を表示（タイムゾーン対策版）\n")
+        f_out.write("抽出条件: 直近の最新開示を表示（タイムゾーン・ラグ対策版）\n")
         f_out.write(f"対象銘柄数: {len(company_codes)} 件\n")
         f_out.write("===============================\n\n")
 
         print(f"【開始】{len(company_codes)}件の銘柄をチェック中...")
 
         for idx, code in enumerate(company_codes, start=1):
+            # 4桁コードの場合は後ろに0を付与した5桁（例: 8101 -> 81010）を生成
             api_code = f"{code}0" if len(code) == 4 else code
-            url = f"https://yanoshin.jp{api_code}.json?limit=15"
+
+            # 正しいエンドポイントURL
+            url = f"https://webapi.yanoshin.jp/webapi/tdnet/list/{api_code}.json?limit=15"
 
             try:
                 response = requests.get(url, headers=headers, timeout=15)
@@ -66,13 +71,15 @@ def main():
                 for item in items:
                     tdnet_data = {}
                     if isinstance(item, dict):
+                        # APIの二重階層（"Tdnet"の中にさらに"Tdnet"があるケース）に対応
                         if "Tdnet" in item:
                             inner = item["Tdnet"]
                             tdnet_data = inner.get("Tdnet", inner)
                         else:
                             tdnet_data = item
 
-                    pub_date_str = tdnet_data.get("pubdate", tdnet_data.get("PubDate", ""))
+                    # 大文字・小文字どちらのキー名でも取得できるようにフォールバックを設定
+                    pub_date_str = tdnet_data.get("pubdate", tdnet_data.get("PubDate", "日付不明"))
                     company_name = tdnet_data.get("company_name", tdnet_data.get("CompanyName", "企業名不明"))
                     title = tdnet_data.get("title", tdnet_data.get("Title", "タイトルなし"))
                     pdf_url = tdnet_data.get("document_url", tdnet_data.get("Url", "URLなし"))
@@ -90,9 +97,12 @@ def main():
                     f_out.write("\n")
 
             except Exception as e:
-                pass
+                # 万が一通信エラーが起きてもプログラムを強制終了させず、ログに書き残してスキップする
+                f_out.write(f"=== 証券コード: {code} ===\n  【通信エラー】データの取得に失敗しました: {e}\n\n")
 
             time.sleep(1)
+
+    print(f"\n【完了】すべて終了しました！ 結果ファイル: {output_file}")
 
 if __name__ == "__main__":
     main()
