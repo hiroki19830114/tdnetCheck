@@ -23,12 +23,104 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    # 【修正】余計なシェルスクリプト判定をすべて削除し、Pythonを実行するだけにしました
+    # 【最終修正】Pythonファイルを読み込まず、この場で直接スクリプトを生成して実行します
     - name: Run script
       run: |
-        python chkTdnet.py
+        cat << 'EOF' > inline_script.py
+        import os
+        import time
+        from datetime import datetime
+        import requests
+        from bs4 import BeautifulSoup
 
-    # 【修正】Pythonが生成した「result.txt」をそのまま確実にアップロードします
+        TXT_FILE = "codes.txt"
+        output_file = "result.txt"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        # どんな状態でも、まず最初に確実にresult.txtを生成
+        with open(output_file, "w", encoding="utf-8") as f_init:
+            f_init.write("=== 適時開示・決算速報 取得結果 ===\n")
+            f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f_init.write("==================================================\n\n")
+
+        if not os.path.exists(TXT_FILE):
+            with open(output_file, "a", encoding="utf-8") as f_out:
+                f_out.write(f"【エラー】{TXT_FILE} がリポジトリ内に見つかりません。作成してください。\n")
+            exit(0)
+
+        codes = []
+        with open(TXT_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                clean_line = line.strip()
+                if not clean_line or clean_line.startswith("#"):
+                    continue
+                codes.append(clean_line)
+
+        if not codes:
+            with open(output_file, "a", encoding="utf-8") as f_out:
+                f_out.write("【エラー】codes.txt に有効な証券コードが記載されていません。\n")
+            exit(0)
+
+        hit_records = {}
+
+        for code in codes:
+            # タグ変化に一番強い、株探の「適時開示」タブに直接アクセス
+            url = f"https://kabutan.jp{code}&b=k"
+            try:
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                
+                # テーブル内のニュース行を全取得
+                table = soup.find("table", class_="news_list")
+                if not table:
+                    continue
+                    
+                rows = table.find_all("tr")
+                code_hits = []
+                count = 0
+                
+                for row in rows:
+                    if count >= 5: # 直近5件
+                        break
+                    time_elem = row.find("time")
+                    td_title = row.find("td", class_="news_title")
+                    if time_elem and td_title:
+                        a_tag = td_title.find("a")
+                        if a_tag:
+                            time_text = time_elem.get_text(strip=True)
+                            title_text = a_tag.get_text(strip=True)
+                            link_url = "https://kabutan.jp" + a_tag["href"]
+                            
+                            record = f"[{time_text}] {title_text}\n  URL: {link_url}\n"
+                            code_hits.append(record)
+                            count += 1
+                            
+                if code_hits:
+                    hit_records[code] = code_hits
+            except Exception as e:
+                pass
+            time.sleep(1)
+
+        # 最後に結果を追記
+        with open(output_file, "a", encoding="utf-8") as f_out:
+            if hit_records:
+                for code, records in hit_records.items():
+                    f_out.write(f"=== 証券コード: {code} ===\n")
+                    for r in records:
+                        f_out.write(r)
+                    f_out.write("\n")
+            else:
+                f_out.write("監視対象銘柄の最新の開示情報が見つかりませんでした。\n")
+        EOF
+        
+        # 作成したスクリプトを実行
+        python inline_script.py
+
+    # 上記で確実に生成された result.txt をアップロード
     - name: Upload Result Artifact
       uses: actions/upload-artifact@v4
       with:
