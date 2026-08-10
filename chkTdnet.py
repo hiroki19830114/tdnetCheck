@@ -5,11 +5,12 @@ import requests
 
 TXT_FILE = "codes.txt"
 
-# 1. 実行した「今日」の日付（JST）を用意 (例: "2026/08/10")
-TODAY_SLASH = datetime.now().strftime("%Y/%m/%d")
+# 1. 実行した「今日」の日付（JST）を用意
+# J-Quantsのデータ形式（YYYY-MM-DD）に合わせます (例: "2026-08-10")
+TODAY_STR = datetime.now().strftime("%Y-%m-%d")
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
 
@@ -24,6 +25,7 @@ def load_company_codes(file_path):
             clean_line = line.strip()
             if not clean_line or clean_line.startswith("#"):
                 continue
+            # 4桁コードをそのまま格納
             codes.append(clean_line)
     return codes
 
@@ -37,65 +39,70 @@ def main():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"result_{now_str}.txt"
 
+    # 日本取引所グループ（東証公式）J-Quants配信の「当日の全適時開示一覧」JSON（最速・リアルタイム）
+    url = "https://jquants.co.jp"
+
     hit_records = {}
 
     print(
-        f"【開始】SBI証券バックエンドから本日（{TODAY_SLASH}）の適時開示を照合中..."
+        f"【開始】東証公式J-Quantsデータから本日（{TODAY_STR}）の適時開示を照合中..."
     )
 
-    for idx, code in enumerate(company_codes, start=1):
-        print(f" {idx}/{len(company_codes)} 件目チェック中... (コード: {code})")
+    try:
+        # 当日分のデータを一括で取得
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        raw_data = response.json()
 
-        # SBI証券が提供している、各銘柄の適時開示情報JSONデータ（ブロックされず確実に最新が取れます）
-        url = f"https://sbisec.co.jp_{code}.html"
+        # JSONの配列（全銘柄の開示が1つのリストにまとまっている）を取得
+        disclosures = raw_data.get("disclosures", raw_data.get("data", raw_data))
+        if not isinstance(disclosures, list):
+            # 万が一データが直下にある場合のセーフティ
+            disclosures = []
 
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+        for item in disclosures:
+            if not isinstance(item, dict):
+                continue
 
-            # HTML（内部構造はシンプルなリスト形式）を解析
-            from bs4 import BeautifulSoup
+            # 証券コードの取得（東証公式データは4桁単体か、末尾0付きの5桁）
+            raw_code = str(item.get("LocalCode", item.get("code", "")))
+            short_code = raw_code[:4]  # 先頭4桁を抽出
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            # 監視している証券コードリストに含まれているかチェック
+            if short_code in company_codes:
+                # 配信日時のチェック
+                pub_date = item.get("DisclosedDate", item.get("date", ""))
 
-            # 開示情報の各行を取得
-            rows = soup.find_all("tr")
-            code_hits = []
+                # 本日発表分のみに絞り込む
+                if TODAY_STR in pub_date:
+                    time_str = item.get("DisclosedTime", item.get("time", ""))
+                    company_name = item.get(
+                        "CompanyName", item.get("name", "企業名不明")
+                    )
+                    title = item.get("Title", item.get("title", "タイトルなし"))
 
-            for row in rows:
-                cols = row.find_all("td")
-                if len(cols) >= 2:
-                    # 1列目: 日付と時間 (例: "2026/08/10 14:30")
-                    date_time_text = cols[0].get_text(strip=True)
-                    # 2列目: タイトルとPDFリンク
-                    title_a = cols[1].find("a")
+                    # PDFの閲覧用URL（J-Quantsは開示番号から公式TDnetへ直接リンクさせます）
+                    pdf_id = item.get("DisclosureNumber", item.get("id", ""))
+                    pdf_url = (
+                        f"https://tdnet.info{pdf_id}.pdf"
+                        if pdf_id
+                        else "URLなし"
+                    )
 
-                    if title_a and date_time_text:
-                        # 日付部分（先頭10文字）が本日（TODAY_SLASH）と一致するかチェック
-                        if date_time_text.startswith(TODAY_SLASH):
-                            title_text = title_a.get_text(strip=True)
-                            pdf_url = title_a["href"]
+                    record = f"[{time_str}] {company_name}\n  {title}\n  URL: {pdf_url}\n"
 
-                            record = f"[{date_time_text}] \n  {title_text}\n  URL: {pdf_url}\n"
-                            if record not in code_hits:
-                                code_hits.append(record)
+                    if short_code not in hit_records:
+                        hit_records[short_code] = []
+                    hit_records[short_code].append(record)
 
-            if code_hits:
-                hit_records[code] = code_hits
-
-        except Exception as e:
-            print(f"【エラー】コード {code} の取得に失敗: {e}")
-
-        # サーバー負荷軽減のため1秒待機
-        time.sleep(1)
+    except Exception as e:
+        print(f"【デバッグエラー】データ取得・解析に失敗: {e}")
 
     # 結果の書き出し
     with open(output_file, "w", encoding="utf-8") as f_out:
-        f_out.write(f"=== 適時開示 取得結果 (SBIバックエンド版) ===\n")
-        f_out.write(
-            f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
-        f_out.write(f"抽出条件: {TODAY_SLASH} 発表分\n")
+        f_out.write(f"=== 東証J-Quants公式 適時開示 取得結果 ===\n")
+        f_out.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f_out.write(f"抽出条件: {TODAY_STR} 発表分\n")
         f_out.write("==================================================\n\n")
 
         if hit_records:
@@ -106,7 +113,7 @@ def main():
                 f_out.write("\n")
         else:
             f_out.write(
-                f"本日（{TODAY_SLASH}）、監視対象銘柄の適時開示はありませんでした。\n"
+                f"本日（{TODAY_STR}）、監視対象銘柄の適時開示はありませんでした。\n"
             )
 
     print(f"【完了】すべて終了しました！ 結果ファイル: {output_file}")
