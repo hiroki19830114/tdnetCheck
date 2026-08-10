@@ -37,18 +37,10 @@ jobs:
           echo "RESULT_FILE=no_result.txt" >> $GITHUB_ENV
         fi
 
-    # 【修正】確実に動作するバージョンと設定に変更
-    - name: Send Mail
-      uses: dawidd6/action-send-mail@v3.12.0
+    # 【修正】トラブルの多いメール送信をやめ、ファイルをGitHub上に安全に保存する方式に変更
+    - name: Upload Result Artifact
+      uses: actions/upload-artifact@v4
       with:
-        server_address: ://gmail.com
-        server_port: 465
-        username: ${{ secrets.MAIL_USERNAME }}
-        password: ${{ secrets.MAIL_PASSWORD }}
-        
-        subject: "【自動配信】TDnet適時開示 取得結果通知"
-        to: "haruharuharu0114@gmail.com"
-        from: "TDnet Bot <${{ secrets.MAIL_USERNAME }}>"
-        
-        body: "本日の東証TDnet適時開示のチェックが完了しました。詳細は添付のテキストファイルをご確認ください。"
-        attachments: "${{ env.RESULT_FILE }}"
+        name: tdnet-result
+        path: "${{ env.RESULT_FILE }}"
+        retention-days: 7
