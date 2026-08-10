@@ -32,8 +32,8 @@ def main():
         print("【エラー】codes.txt に有効な証券コードが記載されていません。")
         return
 
-    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"result_{now_str}.txt"
+    # 【修正】GitHub Actionsでの誤判定を防ぐため、出力ファイル名を「result.txt」に完全固定します
+    output_file = "result.txt"
 
     hit_records = {}
 
@@ -44,7 +44,7 @@ def main():
     for idx, code in enumerate(company_codes, start=1):
         print(f" {idx}/{len(company_codes)} 件目チェック中... (コード: {code})")
 
-        # どんなサーバーからでも確実にブロックされず、過去ログも保持している株探の適時開示ページ
+        # 確実にブロックされず、過去ログも保持している株探の適時開示ページ
         url = f"https://kabutan.jp{code}&b=k"
 
         try:
@@ -61,8 +61,7 @@ def main():
             rows = table.find_all("tr")
             code_hits = []
 
-            # 厳密な「今日だけ」という制限を外し、直近で発表された上位5件をそのまま取得
-            # これによりタイムゾーンのズレや夜間実行による消失を完全に回避します
+            # 直近で発表された上位5件をそのまま取得
             count = 0
             for row in rows:
                 if count >= 5:  # 最新の5件に絞る
@@ -72,7 +71,6 @@ def main():
                 if not time_elem:
                     continue
 
-                # 配信日時（例: "26/08/10 14:30"）
                 time_text = time_elem.get_text(strip=True)
 
                 # タイトルとURL
@@ -99,7 +97,7 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f_out:
         f_out.write(f"=== 適時開示・決算速報 取得結果 (確実版) ===\n")
         f_out.write(
-            f"実行日時(環境時間): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"実行日時(JST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
         f_out.write("==================================================\n\n")
 
@@ -110,7 +108,7 @@ def main():
                     f_out.write(r)
                 f_out.write("\n")
         else:
-            f_out.write("開示情報が見つかりませんでした。\n")
+            f_out.write("監視対象銘柄の開示情報が見つかりませんでした。\n")
 
     print(f"【完了】すべて終了しました！ 結果ファイル: {output_file}")
 
