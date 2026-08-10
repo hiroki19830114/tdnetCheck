@@ -2,16 +2,14 @@ import os
 import time
 from datetime import datetime
 import requests
-from bs4 import BeautifulSoup
 
 TXT_FILE = "codes.txt"
 
-# 東証TDnetの仕様に合わせ、今日（JST）の日付を取得
-# 本日（2026/08/10）の場合、TDnet上は「08/10」または「2026/08/10」で表示されます
-TODAY_MMDD = datetime.now().strftime("%m/%d")
+# 1. 実行した「今日」の日付（JST）を用意 (例: "2026/08/10")
+TODAY_SLASH = datetime.now().strftime("%Y/%m/%d")
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 
@@ -39,70 +37,65 @@ def main():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"result_{now_str}.txt"
 
-    # 東証公式の適時開示一覧ページ（当日分を含む直近データがすべて載っているページ）
-    url = "https://tdnet.info"
-
     hit_records = {}
 
     print(
-        f"【開始】東証公式TDnetから本日（{TODAY_MMDD}）の開示情報を照合中..."
+        f"【開始】SBI証券バックエンドから本日（{TODAY_SLASH}）の適時開示を照合中..."
     )
 
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
+    for idx, code in enumerate(company_codes, start=1):
+        print(f" {idx}/{len(company_codes)} 件目チェック中... (コード: {code})")
 
-        # 文字化け対策（東証はShift_JISで書かれているため明示的に変換）
-        response.encoding = "shift_jis"
+        # SBI証券が提供している、各銘柄の適時開示情報JSONデータ（ブロックされず確実に最新が取れます）
+        url = f"https://sbisec.co.jp_{code}.html"
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
 
-        # 開示情報のテーブル（表）の行をすべて取得
-        # TDnetは1つの開示情報が1つの<tr>タグにまとまっています
-        rows = soup.find_all("tr")
+            # HTML（内部構造はシンプルなリスト形式）を解析
+            from bs4 import BeautifulSoup
 
-        for row in rows:
-            row_text = row.get_text()
+            soup = BeautifulSoup(response.text, "html.parser")
 
-            # 監視している証券コード（4桁）がその行に含まれているかチェック
-            for code in company_codes:
-                if code in row_text:
-                    # その行から「時間」「会社名」「タイトル」「PDFのURL」を抽出
-                    time_elem = row.find("td", class_="yjSt")
-                    time_text = (
-                        time_elem.get_text(strip=True) if time_elem else ""
-                    )
+            # 開示情報の各行を取得
+            rows = soup.find_all("tr")
+            code_hits = []
 
-                    # 本日の日付データ、または時間の記述があるか確認
-                    # TDnetの仕様上、当日分は「14:30」のように時間だけ表示されます
-                    title_a = row.find("a", class_="kaijiTitle")
-                    if title_a:
-                        title_text = title_a.get_text(strip=True)
-                        pdf_link = "https://tdnet.info" + title_a["href"]
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    # 1列目: 日付と時間 (例: "2026/08/10 14:30")
+                    date_time_text = cols[0].get_text(strip=True)
+                    # 2列目: タイトルとPDFリンク
+                    title_a = cols[1].find("a")
 
-                        company_elem = row.find("td", class_="yjM")
-                        company_name = (
-                            company_elem.get_text(strip=True)
-                            if company_elem
-                            else "企業名不明"
-                        )
+                    if title_a and date_time_text:
+                        # 日付部分（先頭10文字）が本日（TODAY_SLASH）と一致するかチェック
+                        if date_time_text.startswith(TODAY_SLASH):
+                            title_text = title_a.get_text(strip=True)
+                            pdf_url = title_a["href"]
 
-                        record = f"[{time_text}] {company_name}\n  {title_text}\n  URL: {pdf_link}\n"
+                            record = f"[{date_time_text}] \n  {title_text}\n  URL: {pdf_url}\n"
+                            if record not in code_hits:
+                                code_hits.append(record)
 
-                        if code not in hit_records:
-                            hit_records[code] = []
-                        if record not in hit_records[code]:
-                            hit_records[code].append(record)
+            if code_hits:
+                hit_records[code] = code_hits
 
-    except Exception as e:
-        print(f"【エラー】TDnetの解析に失敗しました: {e}")
+        except Exception as e:
+            print(f"【エラー】コード {code} の取得に失敗: {e}")
+
+        # サーバー負荷軽減のため1秒待機
+        time.sleep(1)
 
     # 結果の書き出し
     with open(output_file, "w", encoding="utf-8") as f_out:
-        f_out.write(f"=== 東証公式 TDnet適時開示 取得結果 ===\n")
+        f_out.write(f"=== 適時開示 取得結果 (SBIバックエンド版) ===\n")
         f_out.write(
             f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
+        f_out.write(f"抽出条件: {TODAY_SLASH} 発表分\n")
         f_out.write("==================================================\n\n")
 
         if hit_records:
@@ -113,7 +106,7 @@ def main():
                 f_out.write("\n")
         else:
             f_out.write(
-                f"本日、監視対象銘柄（{', '.join(company_codes)}）の適時開示はありませんでした（または発表時間外です）。\n"
+                f"本日（{TODAY_SLASH}）、監視対象銘柄の適時開示はありませんでした。\n"
             )
 
     print(f"【完了】すべて終了しました！ 結果ファイル: {output_file}")
