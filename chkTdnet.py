@@ -6,7 +6,7 @@ import requests
 
 TXT_FILE = "codes.txt"
 
-# 1. 実行した「今日」の日付を自動計算（例: "2026-08-09" 形式と "2026/08/09" 形式を用意）
+# 1. 実行した「今日」の日付を自動計算
 TODAY_HYPHEN = datetime.now().strftime("%Y-%m-%d")
 TODAY_SLASH = datetime.now().strftime("%Y/%m/%d")
 
@@ -15,7 +15,6 @@ headers = {
 }
 
 
-# ファイルから証券コードのリストを読み込む関数
 def load_company_codes(file_path):
     if not os.path.exists(file_path):
         print(f"【エラー】{file_path} が見つかりません。")
@@ -37,7 +36,6 @@ def main():
         print("【エラー】codes.txt に有効な証券コードが記載されていません。")
         return
 
-    # 保存用のファイル名
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"result_{now_str}.txt"
 
@@ -53,11 +51,14 @@ def main():
         )
 
         for idx, code in enumerate(company_codes, start=1):
-            if idx % 10 == 0:
-                print(f" {idx}/{len(company_codes)} 件目処理中...")
+            # APIの仕様に合わせ、4桁コードの場合は後ろに0を付与した5桁（例: 8101 -> 81010）を生成
+            api_code = f"{code}0" if len(code) == 4 else code
 
-            # 【修正】正しいAPIのURLエンドポイントに変更
-            url = f"https://webapi.yanoshin.jp/webapi/tdnet/list/{code}.json?limit=15"
+            if idx % 10 == 0 or code == "8101":
+                print(f" {idx}/{len(company_codes)} 件目処理中... (コード: {code})")
+
+            # 正しいエンドポイント
+            url = f"https://webapi.yanoshin.jp/webapi/tdnet/list/{api_code}.json?limit=15"
 
             try:
                 response = requests.get(url, headers=headers)
@@ -66,7 +67,6 @@ def main():
                 response.raise_for_status()
                 raw_data = response.json()
 
-                # APIは通常、{"items": [...]} またはリストを返す
                 items = []
                 if isinstance(raw_data, dict):
                     items = raw_data.get("items", raw_data.get("item", []))
@@ -80,16 +80,15 @@ def main():
 
                 for item in items:
                     tdnet_data = {}
-                    if isinstance(item, str):
-                        try:
-                            tdnet_data = json.loads(item)
-                        except Exception:
-                            continue
-                    elif isinstance(item, dict):
-                        # 階層の深さに対応するため、"Tdnet"があればそれを、なければ親の辞書を使用
-                        tdnet_data = item.get("Tdnet", item)
+                    if isinstance(item, dict):
+                        # APIの仕様に合わせて階層を深くチェック（item["Tdnet"]["Tdnet"] などの二重階層対策）
+                        if "Tdnet" in item:
+                            inner = item["Tdnet"]
+                            tdnet_data = inner.get("Tdnet", inner)
+                        else:
+                            tdnet_data = item
 
-                    # 【修正】APIの実際のレスポンスキー（先頭大文字など）に対応
+                    # 大文字・小文字どちらのキー名でも取得できるようにフォールバックを設定
                     pub_date_str = tdnet_data.get(
                         "pubdate", tdnet_data.get("PubDate", "")
                     )
@@ -101,7 +100,7 @@ def main():
                         "document_url", tdnet_data.get("Url", "URLなし")
                     )
 
-                    # 一致チェック：日付文字列の先頭10文字が「今日」かどうか
+                    # 日付チェック
                     if pub_date_str:
                         item_date_prefix = pub_date_str[:10]
                         if (item_date_prefix != TODAY_HYPHEN) and (
@@ -119,10 +118,10 @@ def main():
                         f_out.write(output)
                     f_out.write("\n")
 
-            except Exception:
-                pass
+            except Exception as e:
+                # デバッグ用にエラーが起きた場合はコンソールに出力（本番運用時は pass でも可）
+                print(f"【デバッグエラー】コード {code} で問題発生: {e}")
 
-            # サーバ負荷軽減のため1秒待機
             time.sleep(1)
 
         f_out.write("\n【完了】すべてのチェックが終了しました。\n")
