@@ -1,13 +1,14 @@
+import json
 import os
 import time
 from datetime import datetime
 import requests
-from bs4 import BeautifulSoup
 
-TXT_FILE = "codes.txt"
+# 実際のファイル名「code.txt」に合わせました
+TXT_FILE = "code.txt"
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
 def load_company_codes(file_path):
@@ -27,72 +28,82 @@ def load_company_codes(file_path):
 def main():
     company_codes = load_company_codes(TXT_FILE)
     if not company_codes:
-        print("【エラー】codes.txt に有効な証券コードが記載されていません。")
+        print("【エラー】code.txt に有効な証券コードが記載されていません。")
         return
 
-    # ★ どんな状態でも、必ず最初にこの「result.txt」を生成させる
+    # 保存用のファイル名は固定（GitHub Actionsで扱いやすくするため）
     output_file = "result.txt"
-    
-    with open(output_file, "w", encoding="utf-8") as f_init:
-        f_init.write(f"=== 適時開示・決算速報 取得結果 ===\n")
-        f_init.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f_init.write("==================================================\n\n")
 
-    hit_records = {}
+    with open(output_file, "w", encoding="utf-8") as f_out:
+        f_out.write(f"=== TDnet適時開示 取得結果 ===\n")
+        f_out.write(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f_out.write("抽出条件: 直近の開示をそのまま取得（タイムゾーン・ラグ対策版）\n")
+        f_out.write(f"対象銘柄数: {len(company_codes)} 件\n")
+        f_out.write("===============================\n\n")
 
-    print("【開始】データ抽出を開始します...")
+        print(f"【開始】{len(company_codes)}件の銘柄をチェック中...")
 
-    for idx, code in enumerate(company_codes, start=1):
-        print(f" {idx}/{len(company_codes)} 件目チェック中... (コード: {code})")
+        for idx, code in enumerate(company_codes, start=1):
+            # 4桁コードの場合は後ろに0を付与した5桁（例: 8101 -> 81010）を生成
+            api_code = f"{code}0" if len(code) == 4 else code
 
-        # HTMLタグが変化しても一番安定している「株探の個別銘柄ニュースURL」
-        url = f"https://kabutan.jp{code}"
+            # 正しいエンドポイントURL
+            url = f"https://yanoshin.jp{api_code}.json?limit=15"
 
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
+            try:
+                # タイムアウトを設定し、万が一の通信不調でもプログラムがフリーズするのを防ぐ
+                response = requests.get(url, headers=headers, timeout=15)
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+                raw_data = response.json()
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            
-            # 【絶対安全対策】特定のクラス名を指定せず、ページ内のすべてのリンク(aタグ)から情報を抜き取る
-            links = soup.find_all("a")
-            code_hits = []
+                items = []
+                if isinstance(raw_data, dict):
+                    items = raw_data.get("items", raw_data.get("item", []))
+                elif isinstance(raw_data, list):
+                    items = raw_data
 
-            for link in links:
-                title_text = link.get_text(strip=True)
-                href = link.get_attr_list("href")[0] if link.has_attr("href") else ""
-                
-                # リンク先が「ニュース詳細ページ」であり、かつ「決算」「短信」「開示」に関するテキストなら抽出
-                if "news" in href and any(keyword in title_text for keyword in ["決算", "短信", "開示", "速報"]):
-                    full_url = href if href.startswith("http") else "https://kabutan.jp" + href
-                    
-                    record = f"・{title_text}\n  URL: {full_url}\n"
-                    if record not in code_hits:
-                        code_hits.append(record)
-                    
-                    if len(code_hits) >= 5: # 最新の5件でストップ
-                        break
+                if not items:
+                    continue
 
-            if code_hits:
-                hit_records[code] = code_hits
+                filtered_outputs = []
 
-        except Exception as e:
-            print(f"【エラー】コード {code} のアクセス/解析に失敗: {e}")
+                for item in items:
+                    tdnet_data = {}
+                    if isinstance(item, dict):
+                        # APIの二重階層（"Tdnet"の中にさらに"Tdnet"があるケース）に対応
+                        if "Tdnet" in item:
+                            inner = item["Tdnet"]
+                            tdnet_data = inner.get("Tdnet", inner)
+                        else:
+                            tdnet_data = item
 
-        time.sleep(1)
+                    # 大文字・小文字どちらのキー名でも取得できるようにフォールバックを設定
+                    pub_date_str = tdnet_data.get("pubdate", tdnet_data.get("PubDate", "日付不明"))
+                    company_name = tdnet_data.get("company_name", tdnet_data.get("CompanyName", "企業名不明"))
+                    title = tdnet_data.get("title", tdnet_data.get("Title", "タイトルなし"))
+                    pdf_url = tdnet_data.get("document_url", tdnet_data.get("Url", "URLなし"))
 
-    # 最終的な結果を、最初に作った「result.txt」の末尾に追記する
-    with open(output_file, "a", encoding="utf-8") as f_out:
-        if hit_records:
-            for code, records in hit_records.items():
-                f_out.write(f"=== 証券コード: {code} ===\n")
-                for r in records:
-                    f_out.write(r)
-                f_out.write("\n")
-        else:
-            f_out.write("条件に一致する最新の開示情報が見つかりませんでした。\n")
+                    # 日付の完全一致制限を解除し、直近のデータをそのままリスト化
+                    filtered_outputs.append(
+                        f"[{pub_date_str}] {company_name}\n  {title}\n  URL: {pdf_url}\n"
+                    )
 
-    print(f"【完了】すべて終了しました。")
+                if filtered_outputs:
+                    f_out.write(f"=== 証券コード: {code} ===\n")
+                    for output in filtered_outputs:
+                        f_out.write(output)
+                    f_out.write("\n")
+
+            except Exception as e:
+                # 万が一通信エラーが起きてもプログラムを強制終了させず、ログに書き残してスキップする
+                f_out.write(f"=== 証券コード: {code} ===\n  【通信エラー】データの取得に失敗しました: {e}\n\n")
+
+            # 1秒待機
+            time.sleep(1)
+
+    print(f"\n【完了】すべて終了しました！ 結果ファイル: {output_file}")
 
 if __name__ == "__main__":
     main()
